@@ -1,0 +1,5 @@
+streamlit
+google-ads
+pandas
+plotly
+openpyxl
