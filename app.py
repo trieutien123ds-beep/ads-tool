@@ -1690,7 +1690,12 @@ def query_account_available_funds(_client, customer_id: str) -> dict:
 
 @st.cache_data(ttl=900, show_spinner=False)
 def query_account_campaign_details(_client, customer_id: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """Read child account campaign details for the selected date range."""
+    """读取单个子账号在所选日期范围内的广告系列汇总数据。
+
+    说明：不同 Google Ads API 版本不一定支持 campaign.start_date / campaign.end_date。
+    这里改用 segments.date 读取实际产生数据的日期，再按广告系列汇总，避免
+    Unrecognized fields: campaign.start_date / campaign.end_date 错误。
+    """
     customer_id = normalize_customer_id(customer_id)
     ga_service = _client.get_service("GoogleAdsService")
     start_time = time.perf_counter()
@@ -1698,11 +1703,10 @@ def query_account_campaign_details(_client, customer_id: str, start_date: str, e
     campaign_query = f"""
         SELECT
           customer.currency_code,
+          segments.date,
           campaign.id,
           campaign.name,
           campaign.status,
-          campaign.start_date,
-          campaign.end_date,
           campaign_budget.amount_micros,
           metrics.impressions,
           metrics.clicks,
@@ -1713,7 +1717,7 @@ def query_account_campaign_details(_client, customer_id: str, start_date: str, e
         WHERE
           campaign.status != 'REMOVED'
           AND segments.date BETWEEN '{start_date}' AND '{end_date}'
-        ORDER BY metrics.cost_micros DESC
+        ORDER BY segments.date ASC
     """
 
     bid_query = """
@@ -1729,50 +1733,73 @@ def query_account_campaign_details(_client, customer_id: str, start_date: str, e
 
     try:
         bid_map = {}
-        bid_response = ga_service.search_stream(customer_id=customer_id, query=bid_query)
-        for batch in bid_response:
-            for row in batch.results:
-                campaign_id = str(row.campaign.id)
-                cpc = micros_to_amount(row.ad_group.cpc_bid_micros or 0)
-                if cpc and cpc > 0 and campaign_id not in bid_map:
-                    bid_map[campaign_id] = cpc
+        try:
+            bid_response = ga_service.search_stream(customer_id=customer_id, query=bid_query)
+            for batch in bid_response:
+                for row in batch.results:
+                    campaign_id = str(row.campaign.id)
+                    cpc = micros_to_amount(row.ad_group.cpc_bid_micros or 0)
+                    if cpc and cpc > 0 and campaign_id not in bid_map:
+                        bid_map[campaign_id] = cpc
+        except Exception as bid_error:
+            # 读取出价失败时，不影响主数据表；配置 CPC 显示为 /。
+            record_api_usage("ad_group_configured_cpc", customer_id, start_date, end_date, "失败", 0, 0, str(bid_error))
 
-        rows = []
+        raw_rows = []
         response = ga_service.search_stream(customer_id=customer_id, query=campaign_query)
         for batch in response:
             for row in batch.results:
-                impressions = int(row.metrics.impressions or 0)
-                clicks = int(row.metrics.clicks or 0)
-                cost = float(row.metrics.cost_micros or 0) / 1_000_000
-                campaign_id = str(row.campaign.id)
-                configured_cpc = bid_map.get(campaign_id)
-                campaign_start = str(row.campaign.start_date or "")
-
-                rows.append({
-                    "campaign_id": campaign_id,
+                raw_rows.append({
+                    "campaign_id": str(row.campaign.id),
                     "campaign_name": row.campaign.name,
                     "status": row.campaign.status.name,
                     "budget": micros_to_amount(row.campaign_budget.amount_micros or 0),
-                    "impressions": impressions,
-                    "clicks": clicks,
-                    "ctr": round(safe_divide(clicks, impressions) * 100, 2),
-                    "actual_cpc": round(safe_divide(cost, clicks), 2),
-                    "configured_cpc": configured_cpc,
+                    "date": str(row.segments.date),
+                    "impressions": int(row.metrics.impressions or 0),
+                    "clicks": int(row.metrics.clicks or 0),
+                    "cost": round(float(row.metrics.cost_micros or 0) / 1_000_000, 2),
+                    "conversions": float(row.metrics.conversions or 0),
+                    "conversions_value": float(row.metrics.conversions_value or 0),
                     "account_currency": row.customer.currency_code,
-                    "cost": round(cost, 2),
-                    "start_date": campaign_start,
-                    "end_date": str(row.campaign.end_date or ""),
-                    "days": calculate_campaign_days(campaign_start, end_date),
                 })
-        df = pd.DataFrame(rows)
+
+        if not raw_rows:
+            df = pd.DataFrame()
+        else:
+            raw_df = pd.DataFrame(raw_rows)
+            grouped = raw_df.groupby(["campaign_id", "campaign_name"], as_index=False).agg(
+                status=("status", "last"),
+                budget=("budget", "max"),
+                account_currency=("account_currency", "last"),
+                first_date=("date", "min"),
+                last_date=("date", "max"),
+                impressions=("impressions", "sum"),
+                clicks=("clicks", "sum"),
+                cost=("cost", "sum"),
+                conversions=("conversions", "sum"),
+                conversions_value=("conversions_value", "sum"),
+            )
+            grouped["cost"] = grouped["cost"].round(2)
+            grouped["ctr"] = grouped.apply(lambda r: round(safe_divide(r["clicks"], r["impressions"]) * 100, 2), axis=1)
+            grouped["actual_cpc"] = grouped.apply(lambda r: round(safe_divide(r["cost"], r["clicks"]), 2), axis=1)
+            grouped["configured_cpc"] = grouped["campaign_id"].map(bid_map)
+            grouped["delivery_date"] = grouped.apply(
+                lambda r: r["first_date"] if r["first_date"] == r["last_date"] else f"{r['first_date']} 至 {r['last_date']}",
+                axis=1,
+            )
+            df = grouped[[
+                "campaign_id", "campaign_name", "status", "budget", "impressions", "clicks",
+                "ctr", "actual_cpc", "configured_cpc", "account_currency", "cost", "delivery_date",
+                "conversions", "conversions_value"
+            ]]
+
         elapsed = time.perf_counter() - start_time
-        record_api_usage("child_campaign_details", customer_id, start_date, end_date, "success", len(df), elapsed, "")
+        record_api_usage("child_campaign_details", customer_id, start_date, end_date, "成功", len(df), elapsed, "")
         return df
     except Exception as e:
         elapsed = time.perf_counter() - start_time
-        record_api_usage("child_campaign_details", customer_id, start_date, end_date, "failed", 0, elapsed, str(e))
+        record_api_usage("child_campaign_details", customer_id, start_date, end_date, "失败", 0, elapsed, str(e))
         raise
-
 
 def query_enabled_campaign_count(_client, customer_id: str) -> int:
     """Read the number of ENABLED campaigns for one child account."""
@@ -2167,7 +2194,6 @@ def query_campaign_table_for_accounts(_client, customer_ids: list, accounts_df: 
     progress.empty()
     details_df = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
     if not details_df.empty:
-        details_df["runtime_days_to_today"] = details_df["start_date"].apply(calculate_campaign_days_to_today)
         details_df = details_df.sort_values(["cost", "impressions", "clicks"], ascending=[False, False, False]).reset_index(drop=True)
     return details_df, pd.DataFrame(error_rows)
 
@@ -2275,7 +2301,7 @@ def render_campaign_trend_content(client, account_id: str, account_name: str, ca
         f"""
         <div class="soft-card" style="margin-bottom:10px;">
             <div style="font-weight:900;color:#111827;font-size:16px;">{escape(str(campaign_name))}</div>
-            <div class="small-muted">{escape(str(account_name))} · Ads ID：{escape(str(account_id))} · 最近 7 天</div>
+            <div class="small-muted">{escape(str(account_name))} · 最近 7 天</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2378,7 +2404,6 @@ def render_campaign_data_table(client, details_df: pd.DataFrame):
                 padding:8px 4px;
             }
             .campaign-account-name {font-weight:850;color:#111827;font-size:12px !important;}
-            .campaign-account-id {font-size:10px !important;color:#7b8ba5;margin-top:3px;}
         </style>
         """,
         unsafe_allow_html=True,
@@ -2386,9 +2411,9 @@ def render_campaign_data_table(client, details_df: pd.DataFrame):
 
     headers = [
         "Ads子账户名称", "广告系列名称", "广告系列预算", "货币", "展示", "点击", "点击率",
-        "实际CPC", "配置CPC", "花费（费用）", "投放日期", "投放时间", "操作"
+        "实际CPC", "配置CPC", "花费（费用）", "投放日期", "操作"
     ]
-    widths = [1.75, 1.85, 0.9, 0.55, 0.7, 0.65, 0.65, 0.75, 0.75, 0.85, 0.8, 0.85, 0.55]
+    widths = [1.55, 1.95, 0.9, 0.55, 0.7, 0.65, 0.65, 0.75, 0.75, 0.85, 1.15, 0.55]
     header_cols = st.columns(widths, gap="small")
     for col, header in zip(header_cols, headers):
         col.markdown(f'<div class="campaign-grid-head">{escape(header)}</div>', unsafe_allow_html=True)
@@ -2406,11 +2431,10 @@ def render_campaign_data_table(client, details_df: pd.DataFrame):
         account_name = str(row.get("account_name", "/"))
         campaign_id = str(row.get("campaign_id", ""))
         campaign_name = str(row.get("campaign_name", "/"))
-        runtime_days = row.get("runtime_days_to_today")
-        runtime_text = "/" if runtime_days is None or runtime_days == "" or pd.isna(runtime_days) else f"{int(runtime_days)}天"
         configured_cpc = row.get("configured_cpc")
+        delivery_date = row.get("delivery_date") or row.get("date") or "/"
         values = [
-            f'<div><div class="campaign-account-name">{escape(account_name)}</div><div class="campaign-account-id">Ads ID：{escape(account_id)}</div></div>',
+            f'<div class="campaign-account-name">{escape(account_name)}</div>',
             escape(campaign_name),
             escape(format_amount(row.get("budget"), currency)),
             escape(str(currency or "/")),
@@ -2420,8 +2444,7 @@ def render_campaign_data_table(client, details_df: pd.DataFrame):
             escape(format_amount(row.get("actual_cpc"), currency)),
             escape(format_amount(configured_cpc, currency)),
             escape(format_amount(row.get("cost"), currency)),
-            escape(str(row.get("start_date") or "/")),
-            escape(runtime_text),
+            escape(str(delivery_date)),
         ]
         row_cols = st.columns(widths, gap="small")
         for col, value in zip(row_cols[:-1], values):
@@ -2429,7 +2452,6 @@ def render_campaign_data_table(client, details_df: pd.DataFrame):
         with row_cols[-1]:
             if st.button("查看", key=f"trend_btn_{account_id}_{campaign_id}_{idx}", use_container_width=True):
                 open_campaign_trend_dialog(client, account_id, account_name, campaign_id, campaign_name, currency)
-
 
 def render_data_series_controls():
     """数据系列表头右上角的统一日期范围控件。"""
@@ -2526,7 +2548,7 @@ def render_direct_full_page(client, accounts_df: pd.DataFrame, manager_customer_
             f"""
             <div class="placeholder-card">
                 <div style="font-size:18px;font-weight:900;color:#111827;margin-bottom:8px;">暂无广告系列数据</div>
-                <div>当前时间范围：{escape(start_str)} 至 {escape(end_str)}。请确认子账户有广告系列数据，或调整右上角时间范围。</div>
+                <div>当前时间范围：{escape(start_str)} 至 {escape(end_str)}。请确认子账户在该时间范围内有广告系列投放数据，或调整右上角时间范围。</div>
             </div>
             """,
             unsafe_allow_html=True,
