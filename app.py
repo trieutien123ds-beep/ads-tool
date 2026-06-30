@@ -1,6 +1,7 @@
 import re
 from datetime import date, timedelta, datetime
 from io import BytesIO
+from html import escape
 import base64
 import json
 import time
@@ -1453,6 +1454,59 @@ def render_saas_css():
             .account-id { color:#94a3b8; font-size: 11px !important; margin-top: 3px; }
             .table-note { color:#64748b; font-size: 12px !important; }
 
+            .child-table-wrap {
+                background: #ffffff;
+                border: 1px solid #e4eaf2;
+                border-radius: 14px;
+                overflow-x: auto;
+                overflow-y: hidden;
+                box-shadow: 0 8px 22px rgba(15, 23, 42, 0.035);
+                margin-top: 8px;
+            }
+            .child-campaign-table {
+                border-collapse: collapse;
+                table-layout: fixed;
+                min-width: 1794px;
+                width: 1794px;
+                color: #1f2a44;
+                font-size: 13px !important;
+            }
+            .child-campaign-table th {
+                background: #f5f7fb;
+                color: #64748b;
+                font-weight: 800;
+                font-size: 12px !important;
+                padding: 10px 12px;
+                border-bottom: 1px solid #dfe7f1;
+                text-align: left;
+                white-space: nowrap;
+            }
+            .child-campaign-table td {
+                padding: 12px 12px;
+                border-bottom: 1px solid #e8edf4;
+                text-align: left;
+                vertical-align: middle;
+                line-height: 1.28;
+                word-break: break-word;
+                background: #ffffff;
+            }
+            .child-campaign-table tr:last-child td { border-bottom: none; }
+            .child-account-name { font-weight: 750; color: #172033; font-size: 13px !important; }
+            .child-account-id { color: #7b8ba5; font-size: 11px !important; margin-top: 3px; }
+            .campaign-status {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                border-radius: 999px;
+                padding: 3px 8px;
+                font-weight: 850;
+                font-size: 12px !important;
+                white-space: nowrap;
+            }
+            .status-enabled { background: #dcfce7; color: #16a34a; }
+            .status-paused { background: #fef3c7; color: #b45309; }
+            .status-muted { background: #e5e7eb; color: #64748b; }
+
             .placeholder-card {
                 background: #ffffff; border:1px dashed #cbd5e1; border-radius: 18px;
                 padding: 34px 22px; text-align: center; color:#64748b;
@@ -1500,7 +1554,7 @@ def render_sidebar_brand(manager_customer_id: str, accounts_count: int):
     )
 
 
-def render_top_header(page_title: str, subtitle: str, selected_count: int, date_label: str):
+def render_top_header(page_title: str, subtitle: str, selected_count: int, date_label: str, show_date_label: bool = True):
     left, right = st.columns([1.5, 1.1], gap="large")
     with left:
         st.markdown(
@@ -1515,19 +1569,19 @@ def render_top_header(page_title: str, subtitle: str, selected_count: int, date_
         )
     with right:
         last_refresh = st.session_state.get("last_refresh_time", "尚未刷新")
+        date_html = f'<span class="small-muted">{date_label}</span>' if show_date_label else ''
         st.markdown(
             f"""
             <div class="top-panel">
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;">
                     <span class="status-pill">● 当前选择 {selected_count} 个账户</span>
-                    <span class="small-muted">{date_label}</span>
+                    {date_html}
                 </div>
                 <div class="small-muted">最近刷新时间：<b>{last_refresh}</b></div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-
 
 def render_metric_card(label: str, value: str, help_text: str = ""):
     st.markdown(
@@ -1664,7 +1718,7 @@ def query_account_available_funds(_client, customer_id: str) -> dict:
 
 @st.cache_data(ttl=900, show_spinner=False)
 def query_account_campaign_details(_client, customer_id: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """读取某个子账户的广告系列详情，含预算、实际CPC、配置CPC。"""
+    """Read child account campaign details for the selected date range."""
     customer_id = normalize_customer_id(customer_id)
     ga_service = _client.get_service("GoogleAdsService")
     start_time = time.perf_counter()
@@ -1675,6 +1729,8 @@ def query_account_campaign_details(_client, customer_id: str, start_date: str, e
           campaign.id,
           campaign.name,
           campaign.status,
+          campaign.start_date,
+          campaign.end_date,
           campaign_budget.amount_micros,
           metrics.impressions,
           metrics.clicks,
@@ -1706,7 +1762,7 @@ def query_account_campaign_details(_client, customer_id: str, start_date: str, e
             for row in batch.results:
                 campaign_id = str(row.campaign.id)
                 cpc = micros_to_amount(row.ad_group.cpc_bid_micros or 0)
-                if cpc and cpc > 0:
+                if cpc and cpc > 0 and campaign_id not in bid_map:
                     bid_map[campaign_id] = cpc
 
         rows = []
@@ -1718,29 +1774,111 @@ def query_account_campaign_details(_client, customer_id: str, start_date: str, e
                 cost = float(row.metrics.cost_micros or 0) / 1_000_000
                 campaign_id = str(row.campaign.id)
                 configured_cpc = bid_map.get(campaign_id)
+                campaign_start = str(row.campaign.start_date or "")
+
                 rows.append({
-                    "广告系列ID": campaign_id,
-                    "广告系列名称": row.campaign.name,
-                    "状态": row.campaign.status.name,
-                    "预算金额": micros_to_amount(row.campaign_budget.amount_micros or 0),
-                    "展示": impressions,
-                    "点击": clicks,
-                    "实际CPC": round(safe_divide(cost, clicks), 2),
-                    "配置CPC": format_amount(configured_cpc, row.customer.currency_code) if configured_cpc else "/",
-                    "佣金": "",
-                    "账户币种": row.customer.currency_code,
-                    "花费": round(cost, 2),
-                    "转化数": round(float(row.metrics.conversions or 0), 2),
-                    "转化价值": round(float(row.metrics.conversions_value or 0), 2),
+                    "campaign_id": campaign_id,
+                    "campaign_name": row.campaign.name,
+                    "status": row.campaign.status.name,
+                    "budget": micros_to_amount(row.campaign_budget.amount_micros or 0),
+                    "impressions": impressions,
+                    "clicks": clicks,
+                    "ctr": round(safe_divide(clicks, impressions) * 100, 2),
+                    "actual_cpc": round(safe_divide(cost, clicks), 2),
+                    "configured_cpc": configured_cpc,
+                    "account_currency": row.customer.currency_code,
+                    "cost": round(cost, 2),
+                    "start_date": campaign_start,
+                    "end_date": str(row.campaign.end_date or ""),
+                    "days": calculate_campaign_days(campaign_start, end_date),
                 })
         df = pd.DataFrame(rows)
         elapsed = time.perf_counter() - start_time
-        record_api_usage("子账号广告系列详情", customer_id, start_date, end_date, "成功", len(df), elapsed, "")
+        record_api_usage("child_campaign_details", customer_id, start_date, end_date, "success", len(df), elapsed, "")
         return df
     except Exception as e:
         elapsed = time.perf_counter() - start_time
-        record_api_usage("子账号广告系列详情", customer_id, start_date, end_date, "失败", 0, elapsed, str(e))
+        record_api_usage("child_campaign_details", customer_id, start_date, end_date, "failed", 0, elapsed, str(e))
         raise
+
+
+def query_enabled_campaign_count(_client, customer_id: str) -> int:
+    """Read the number of ENABLED campaigns for one child account."""
+    customer_id = normalize_customer_id(customer_id)
+    ga_service = _client.get_service("GoogleAdsService")
+    start_time = time.perf_counter()
+    query = """
+        SELECT
+          campaign.id,
+          campaign.status
+        FROM campaign
+        WHERE campaign.status = 'ENABLED'
+    """
+
+    try:
+        count = 0
+        response = ga_service.search_stream(customer_id=customer_id, query=query)
+        for batch in response:
+            count += len(batch.results)
+        elapsed = time.perf_counter() - start_time
+        record_api_usage("enabled_campaign_count", customer_id, "", "", "success", count, elapsed, "")
+        return count
+    except Exception as e:
+        elapsed = time.perf_counter() - start_time
+        record_api_usage("enabled_campaign_count", customer_id, "", "", "failed", 0, elapsed, str(e))
+        raise
+
+
+def query_child_campaigns_for_accounts(client, customer_ids: list, accounts_df: pd.DataFrame, start_date: str, end_date: str):
+    """Read child-account campaign rows for the currently selected accounts."""
+    details = []
+    error_rows = []
+    enabled_count = 0
+    col_account_id = "账户ID"
+    col_account_name = "账户名称"
+    col_currency = "币种"
+    col_available_funds = "可用资金"
+
+    account_name_map = {}
+    account_currency_map = {}
+    if not accounts_df.empty and col_account_id in accounts_df.columns:
+        account_name_map = dict(zip(accounts_df[col_account_id], accounts_df[col_account_name]))
+        if col_currency in accounts_df.columns:
+            account_currency_map = dict(zip(accounts_df[col_account_id], accounts_df[col_currency]))
+
+    total_accounts = len(customer_ids)
+    progress = st.progress(0, text="准备读取子账号广告系列数据...")
+
+    for index, customer_id in enumerate(customer_ids, start=1):
+        customer_id = normalize_customer_id(customer_id)
+        account_name = account_name_map.get(customer_id, f"Google Ads {customer_id}")
+        progress.progress(
+            min(index / max(total_accounts, 1), 1.0),
+            text=f"正在查询 {index}/{total_accounts}：{account_name}（{customer_id}）"
+        )
+
+        try:
+            enabled_count += query_enabled_campaign_count(client, customer_id)
+            funds_info = query_account_available_funds(client, customer_id)
+            funds_value = funds_info.get(col_available_funds)
+            funds_currency = funds_info.get(col_currency) or account_currency_map.get(customer_id, "")
+            detail_df = query_account_campaign_details(client, customer_id, start_date, end_date)
+
+            if not detail_df.empty:
+                detail_df.insert(0, "account_id", customer_id)
+                detail_df.insert(0, "account_name", account_name)
+                detail_df.insert(2, "balance", funds_value)
+                detail_df.insert(3, "currency", funds_currency or detail_df.get("account_currency", pd.Series([""])).iloc[0])
+                details.append(detail_df)
+        except GoogleAdsException as e:
+            error_rows.append({"account_id": customer_id, "account_name": account_name, "error": format_google_ads_error(e)})
+        except Exception as e:
+            error_rows.append({"account_id": customer_id, "account_name": account_name, "error": str(e)})
+
+    progress.empty()
+    details_df = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
+    errors_df = pd.DataFrame(error_rows)
+    return details_df, errors_df, enabled_count
 
 
 def build_account_summary(campaign_df: pd.DataFrame) -> pd.DataFrame:
@@ -1869,72 +2007,150 @@ def render_dashboard_page(campaign_df: pd.DataFrame, daily_df: pd.DataFrame, err
         )
 
 
+def calculate_campaign_days(start_date_value, end_date_value):
+    """Calculate campaign runtime days from campaign start date to selected end date."""
+    if not start_date_value:
+        return None
+    try:
+        start_dt = date.fromisoformat(str(start_date_value)[:10])
+        end_dt = date.fromisoformat(str(end_date_value)[:10])
+    except Exception:
+        return None
+    return max((end_dt - start_dt).days + 1, 0)
+
+
+def format_percent(value):
+    if value is None or value == "" or pd.isna(value):
+        return "/"
+    return f"{float(value):.2f}%"
+
+
+def format_int(value):
+    if value is None or value == "" or pd.isna(value):
+        return "/"
+    return f"{int(value):,}"
+
+
+def campaign_status_label(status: str) -> str:
+    status = str(status or "").upper()
+    if status == "ENABLED":
+        return "启用"
+    if status == "PAUSED":
+        return "暂停"
+    if status == "REMOVED":
+        return "已移除"
+    return status or "/"
+
+
+def campaign_status_class(status: str) -> str:
+    status = str(status or "").upper()
+    if status == "ENABLED":
+        return "status-enabled"
+    if status == "PAUSED":
+        return "status-paused"
+    return "status-muted"
+
+
+def render_child_campaign_table(details_df: pd.DataFrame):
+    """Render the fixed-width child campaign table."""
+    if details_df.empty:
+        st.info("当前时间范围内没有查询到广告系列数据。")
+        return
+
+    col_widths = [230, 120, 84, 260, 110, 90, 80, 90, 100, 100, 100, 110, 120, 100]
+    colgroup = "".join(f'<col style="width:{width}px">' for width in col_widths)
+    headers = [
+        "谷歌ads账户名称", "该账户余额", "币种", "子账户内的广告系列名称", "预算金额", "展示", "点击",
+        "点击率", "实际CPC", "配置CPC", "费用", "投放状态", "广告系列投放日期", "投放时间"
+    ]
+    header_html = "".join(f"<th>{escape(label)}</th>" for label in headers)
+
+    rows_html = []
+    for _, row in details_df.iterrows():
+        currency = row.get("currency") or row.get("account_currency") or ""
+        account_cell = (
+            f'<div class="child-account-name">{escape(str(row.get("account_name", "/")))}</div>'
+            f'<div class="child-account-id">{escape(str(row.get("account_id", "")))}</div>'
+        )
+        status = str(row.get("status", ""))
+        days = row.get("days")
+        days_text = "/" if days is None or days == "" or pd.isna(days) else f"{int(days)}天"
+        status_html = f'<span class="campaign-status {campaign_status_class(status)}">● {escape(campaign_status_label(status))}</span>'
+        row_values = [
+            account_cell,
+            escape(format_amount(row.get("balance"), currency)),
+            escape(str(currency or "/")),
+            escape(str(row.get("campaign_name", "/"))),
+            escape(format_amount(row.get("budget"), currency)),
+            escape(format_int(row.get("impressions"))),
+            escape(format_int(row.get("clicks"))),
+            escape(format_percent(row.get("ctr"))),
+            escape(format_amount(row.get("actual_cpc"), currency)),
+            escape(format_amount(row.get("configured_cpc"), currency)),
+            escape(format_amount(row.get("cost"), currency)),
+            status_html,
+            escape(str(row.get("start_date") or "/")),
+            escape(days_text),
+        ]
+        cells = "".join(f"<td>{value}</td>" for value in row_values)
+        rows_html.append(f"<tr>{cells}</tr>")
+
+    table_html = f"""
+    <div class="child-table-wrap">
+      <table class="child-campaign-table">
+        <colgroup>{colgroup}</colgroup>
+        <thead><tr>{header_html}</tr></thead>
+        <tbody>{''.join(rows_html)}</tbody>
+      </table>
+    </div>
+    """
+    st.markdown(table_html, unsafe_allow_html=True)
+
+
 def render_child_accounts_page(client, accounts_df: pd.DataFrame, selected_customer_ids: list, start_str: str, end_str: str):
-    st.markdown('<div class="section-title">谷歌子账号</div><div class="section-subtitle">这里展示 MCC 下级普通 Google Ads 账户，并支持点击「查看」读取该账户下的广告系列数据。</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-title">\u8c37\u6b4c\u5b50\u8d26\u53f7</div>'
+        '<div class="section-subtitle">\u5c55\u793a\u5de6\u4fa7\u5f53\u524d\u9009\u4e2d Google Ads \u5b50\u8d26\u53f7\u5728\u6240\u9009\u65e5\u671f\u8303\u56f4\u5185\u7684\u5e7f\u544a\u7cfb\u5217\u6570\u636e\u3002</div>',
+        unsafe_allow_html=True,
+    )
 
     if accounts_df.empty:
         st.warning("没有同步到子账号。")
         return
 
-    summary_cols = st.columns(4)
-    with summary_cols[0]: render_metric_card("子账号总数", f"{len(accounts_df)}", "MCC 同步结果")
-    with summary_cols[1]: render_metric_card("当前选中", f"{len(selected_customer_ids)}", "用于仪表盘查询")
-    with summary_cols[2]: render_metric_card("普通广告账户", f"{len(accounts_df[accounts_df['是否MCC'] == False]) if '是否MCC' in accounts_df.columns else len(accounts_df)}", "已排除子MCC")
-    with summary_cols[3]: render_metric_card("时间范围", f"{start_str} → {end_str}", "影响展开后的广告系列数据")
+    current_signature = {
+        "selected_customer_ids": [normalize_customer_id(x) for x in selected_customer_ids],
+        "start_str": start_str,
+        "end_str": end_str,
+    }
+    saved_signature = st.session_state.get("child_campaign_signature")
+    has_current_data = saved_signature == current_signature
+    details_df = st.session_state.get("child_campaign_details_df", pd.DataFrame()) if has_current_data else pd.DataFrame()
+    error_df = st.session_state.get("child_campaign_error_df", pd.DataFrame()) if has_current_data else pd.DataFrame()
+    enabled_count = st.session_state.get("child_enabled_campaign_count", "/") if has_current_data else "/"
 
-    st.markdown('<div class="section-title">子账号列表</div>', unsafe_allow_html=True)
+    summary_cols = st.columns(2)
+    with summary_cols[0]:
+        render_metric_card("子账号总数", f"{len(accounts_df)}", "MCC 同步结果")
+    with summary_cols[1]:
+        render_metric_card("启动的广告系列数量", f"{enabled_count}", "当前选中账号 API 同步结果")
 
-    header = st.columns([2.5, 1.2, 1.2, 1.0])
-    header[0].markdown("**谷歌 Ads 账户名称**")
-    header[1].markdown("**可用资金**")
-    header[2].markdown("**币种/时区**")
-    header[3].markdown("**关联广告系列**")
+    st.markdown('<div class="section-title">\u5e7f\u544a\u7cfb\u5217\u6570\u636e</div>', unsafe_allow_html=True)
+    st.caption(f"当前选择 {len(selected_customer_ids)} 个账号，时间范围：{start_str} 至 {end_str}")
 
-    for _, row in accounts_df.iterrows():
-        account_id = row["账户ID"]
-        account_name = row["账户名称"]
-        currency = row.get("币种", "")
-        timezone = row.get("时区", "")
-        funds_info = query_account_available_funds(client, account_id)
-        funds_text = format_amount(funds_info.get("可用资金"), funds_info.get("币种") or currency)
+    if not selected_customer_ids:
+        st.warning("请先在左侧选择至少一个广告账户。")
+        return
 
-        cols = st.columns([2.5, 1.2, 1.2, 1.0])
-        with cols[0]:
-            st.markdown(f'<div class="account-name">{account_name}</div><div class="account-id">ID：{account_id}</div>', unsafe_allow_html=True)
-        with cols[1]:
-            st.markdown(f"**{funds_text}**")
-            if funds_info.get("说明") not in ("account_budget估算", ""):
-                st.caption(funds_info.get("说明"))
-        with cols[2]:
-            st.markdown(f"{currency or '/'}")
-            st.caption(timezone or "/")
-        with cols[3]:
-            if st.button("查看", key=f"view_campaigns_{account_id}", use_container_width=True):
-                st.session_state["active_child_account_id"] = account_id
-                st.session_state["active_child_account_name"] = account_name
+    if not has_current_data:
+        st.info("点击右上方「刷新数据」后，会按当前选中账号和日期范围同步广告系列数据。")
+        return
 
-        if st.session_state.get("active_child_account_id") == account_id:
-            with st.container():
-                st.markdown(f"<div class='section-subtitle'>正在显示：<b>{account_name}</b>（{account_id}）的关联广告系列，时间范围：{start_str} 至 {end_str}</div>", unsafe_allow_html=True)
-                try:
-                    details_df = query_account_campaign_details(client, account_id, start_str, end_str)
-                    if details_df.empty:
-                        st.info("当前时间范围内没有查询到广告系列数据。")
-                    else:
-                        display_cols = ["广告系列名称", "预算金额", "展示", "点击", "实际CPC", "配置CPC", "佣金"]
-                        details_display = details_df[display_cols].copy()
-                        if "预算金额" in details_display.columns:
-                            details_display["预算金额"] = details_display["预算金额"].apply(lambda x: format_amount(x, details_df["账户币种"].iloc[0] if "账户币种" in details_df.columns and not details_df.empty else currency))
-                        st.dataframe(details_display, use_container_width=True, hide_index=True)
-                except GoogleAdsException as e:
-                    st.error("读取该账户广告系列失败：")
-                    st.code(format_google_ads_error(e))
-                except Exception as e:
-                    st.error(f"读取该账户广告系列失败：{e}")
-        st.markdown("<hr style='margin:8px 0;border:none;border-top:1px solid #eef2f7;' />", unsafe_allow_html=True)
+    render_child_campaign_table(details_df)
 
-    with st.expander("查看原始同步账户表", expanded=False):
-        st.dataframe(accounts_df, use_container_width=True, hide_index=True)
+    if not error_df.empty:
+        with st.expander("查看同步失败的账号", expanded=False):
+            st.dataframe(error_df, use_container_width=True, hide_index=True)
 
 
 if not check_password():
@@ -2003,21 +2219,33 @@ selected_accounts_df = accounts_df[accounts_df["账户ID"].isin(selected_custome
 
 top_controls = st.container()
 with top_controls:
-    c1, c2, c3 = st.columns([1.1, 1.7, 0.75], gap="medium")
-    with c1:
-        preset = st.radio("日期范围", ["最近7天", "最近14天", "最近30天", "自定义"], index=2, horizontal=True)
-    with c2:
-        if preset == "自定义":
-            dc1, dc2 = st.columns(2)
-            custom_start = dc1.date_input("开始日期", value=date.today() - timedelta(days=30))
-            custom_end = dc2.date_input("结束日期", value=date.today())
-        else:
-            custom_start = custom_end = None
-            st.caption("使用快捷日期范围；如需固定日期，选择「自定义」。")
-    start, end = build_date_range_from_preset(preset, custom_start, custom_end)
-    with c3:
-        st.write("")
-        run_button = st.button("刷新数据", type="primary", use_container_width=True)
+    if page == "谷歌子账号":
+        c1, c2, c3 = st.columns([0.95, 0.95, 0.65], gap="medium")
+        saved_child_start = st.session_state.get("child_start_date", date.today() - timedelta(days=30))
+        saved_child_end = st.session_state.get("child_end_date", date.today())
+        with c1:
+            start = st.date_input("开始日期", value=saved_child_start, key="child_start_date")
+        with c2:
+            end = st.date_input("结束日期", value=saved_child_end, key="child_end_date")
+        with c3:
+            st.write("")
+            run_button = st.button("刷新数据", type="primary", use_container_width=True)
+    else:
+        c1, c2, c3 = st.columns([1.1, 1.7, 0.75], gap="medium")
+        with c1:
+            preset = st.radio("日期范围", ["最近7天", "最近14天", "最近30天", "自定义"], index=2, horizontal=True)
+        with c2:
+            if preset == "自定义":
+                dc1, dc2 = st.columns(2)
+                custom_start = dc1.date_input("开始日期", value=date.today() - timedelta(days=30))
+                custom_end = dc2.date_input("结束日期", value=date.today())
+            else:
+                custom_start = custom_end = None
+                st.caption("使用快捷日期范围；如需固定日期，选择「自定义」。")
+        start, end = build_date_range_from_preset(preset, custom_start, custom_end)
+        with c3:
+            st.write("")
+            run_button = st.button("刷新数据", type="primary", use_container_width=True)
 
 if start > end:
     st.error("开始日期不能晚于结束日期。")
@@ -2027,7 +2255,7 @@ start_str = start.isoformat()
 end_str = end.isoformat()
 date_label = f"{start_str} 至 {end_str}"
 
-# ---------- 页面标题 ----------
+# ---------- Page title ----------
 subtitle_map = {
     "仪表盘": "FFS AUTO-ADS · Google Ads 数据分析控制台",
     "谷歌子账号": "MCC 子账号管理 · 可用资金与关联广告系列",
@@ -2037,12 +2265,31 @@ subtitle_map = {
     "报表下载": "导出广告系列和每日趋势数据",
     "系统设置": "系统配置和 API 调用状态",
 }
-render_top_header(page, subtitle_map.get(page, "Google Ads 数据分析控制台"), len(selected_customer_ids), date_label)
+render_top_header(page, subtitle_map.get(page, "Google Ads \u6570\u636e\u5206\u6790\u63a7\u5236\u53f0"), len(selected_customer_ids), date_label, show_date_label=(page != "\u8c37\u6b4c\u5b50\u8d26\u53f7"))
 
 # ---------- 数据刷新逻辑 ----------
 if run_button:
     if not selected_customer_ids:
         st.error("请先选择至少一个广告账户。")
+    elif page == "谷歌子账号":
+        with st.spinner(f"正在从 {len(selected_customer_ids)} 个 Google Ads 子账号拉取广告系列数据，请稍等..."):
+            child_details_df, child_error_df, child_enabled_count = query_child_campaigns_for_accounts(
+                client,
+                selected_customer_ids,
+                accounts_df,
+                start_str,
+                end_str,
+            )
+        st.session_state["child_campaign_details_df"] = child_details_df
+        st.session_state["child_campaign_error_df"] = child_error_df
+        st.session_state["child_enabled_campaign_count"] = child_enabled_count
+        st.session_state["child_campaign_signature"] = {
+            "selected_customer_ids": [normalize_customer_id(x) for x in selected_customer_ids],
+            "start_str": start_str,
+            "end_str": end_str,
+        }
+        st.session_state["last_refresh_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        st.rerun()
     else:
         with st.spinner(f"正在从 {len(selected_customer_ids)} 个 Google Ads 账户拉取数据，请稍等..."):
             campaign_df, daily_df, error_df = query_reports_for_accounts(client, selected_customer_ids, accounts_df, start_str, end_str)
