@@ -15,6 +15,9 @@ from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
 
 
+APP_UI_VERSION = "v4.1-20260630-高级表格确认版"
+
+
 st.set_page_config(
     page_title="FFS AUTO-ADS",
     page_icon="📊",
@@ -1307,7 +1310,7 @@ def render_saas_css():
             }
 
             html, body, .stApp {
-                background: var(--ffs-bg) !important;
+                background: radial-gradient(circle at 8% 0%, #fff1f6 0%, #f8fafc 30%, #f3f6fb 100%) !important;
                 color: var(--ffs-text) !important;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif !important;
             }
@@ -1333,7 +1336,7 @@ def render_saas_css():
             h1 { font-size: 28px !important; margin-bottom: 4px !important; }
             h2 { font-size: 20px !important; }
             h3 { font-size: 16px !important; }
-            p, label, span, div, button { font-size: 13px; }
+            p, label, span, div, button { font-size: 14px; }
 
             .ffs-sidebar-brand {
                 padding: 10px 4px 18px 4px;
@@ -1351,10 +1354,10 @@ def render_saas_css():
             .ffs-brand-sub { font-size: 11px !important; color: #94a3b8; margin-top: 3px; }
 
             .section-title {
-                font-size: 15px; font-weight: 800; color: #111827; margin: 12px 0 8px;
+                font-size: 18px; font-weight: 900; color: #0f172a; margin: 16px 0 10px; letter-spacing:-0.02em;
             }
             .section-subtitle {
-                font-size: 12px; color: #64748b; margin: -3px 0 10px;
+                font-size: 13px; color: #64748b; margin: -3px 0 12px;
             }
             .soft-card {
                 background: #ffffff;
@@ -1366,8 +1369,8 @@ def render_saas_css():
             .top-panel {
                 background: linear-gradient(135deg, #ffffff 0%, #fff7fb 100%);
                 border: 1px solid #e9edf3;
-                border-radius: 22px;
-                padding: 18px 20px;
+                border-radius: 24px;
+                padding: 22px 24px;
                 box-shadow: var(--ffs-shadow);
                 margin-bottom: 14px;
             }
@@ -1381,14 +1384,14 @@ def render_saas_css():
             }
             .page-title {
                 color: #111827;
-                font-size: 26px !important;
-                line-height: 1.1;
+                font-size: 30px !important;
+                line-height: 1.08;
                 font-weight: 900;
                 margin: 0;
             }
             .page-desc {
                 color: #64748b;
-                font-size: 13px !important;
+                font-size: 14px !important;
                 margin-top: 8px;
                 margin-bottom: 0;
             }
@@ -1401,22 +1404,22 @@ def render_saas_css():
             .small-muted { color:#64748b; font-size: 12px !important; }
 
             .metric-card {
-                background: #ffffff;
-                border: 1px solid #e9edf3;
-                border-radius: 18px;
-                padding: 14px 15px 13px;
-                box-shadow: var(--ffs-shadow);
+                background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+                border: 1px solid #e6ecf5;
+                border-radius: 20px;
+                padding: 16px 17px 15px;
+                box-shadow: 0 16px 36px rgba(15,23,42,.07);
                 position: relative;
                 overflow: hidden;
-                min-height: 92px;
+                min-height: 100px;
             }
             .metric-card:before {
                 content:""; position:absolute; left:0; top:0; right:0; height:3px;
                 background: linear-gradient(90deg, #ff7aa4, #f43f78, #6366f1);
             }
-            .metric-label { color:#64748b; font-size: 12px !important; font-weight: 700; margin-bottom: 9px; }
-            .metric-value { color:#111827; font-size: 21px !important; font-weight: 900; line-height: 1; }
-            .metric-help { color:#94a3b8; font-size: 11px !important; margin-top: 8px; }
+            .metric-label { color:#64748b; font-size: 13px !important; font-weight: 800; margin-bottom: 10px; }
+            .metric-value { color:#0f172a; font-size: 24px !important; font-weight: 950; line-height: 1; }
+            .metric-help { color:#94a3b8; font-size: 12px !important; margin-top: 9px; }
 
             .api-grid {
                 display: grid;
@@ -2194,7 +2197,14 @@ def query_campaign_table_for_accounts(_client, customer_ids: list, accounts_df: 
     progress.empty()
     details_df = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
     if not details_df.empty:
-        details_df = details_df.sort_values(["cost", "impressions", "clicks"], ascending=[False, False, False]).reset_index(drop=True)
+        # 按 Ads 子账户分组排序：同一个子账户的多个广告系列固定排在一起；
+        # 子账户内部再按花费、展示、点击降序，方便优先看最重要的广告系列。
+        sort_cols = ["account_name", "account_id", "cost", "impressions", "clicks"]
+        details_df = details_df.sort_values(
+            sort_cols,
+            ascending=[True, True, False, False, False],
+            kind="mergesort",
+        ).reset_index(drop=True)
     return details_df, pd.DataFrame(error_rows)
 
 
@@ -2312,6 +2322,7 @@ def render_campaign_trend_content(client, account_id: str, account_name: str, ca
         st.error(f"读取最近 7 天趋势失败：{e}")
         return
 
+    text_size = 28  # 比默认标记文字大约一倍，便于在弹窗里直接看清每天的数据。
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=trend_df["日期"],
@@ -2320,6 +2331,9 @@ def render_campaign_trend_content(client, account_id: str, account_name: str, ca
         name=f"花费（{currency or ''}）".strip(),
         text=[f"{v:,.2f}" for v in trend_df["花费"]],
         textposition="top center",
+        textfont=dict(size=text_size),
+        marker=dict(size=14),
+        line=dict(width=3),
     ))
     fig.add_trace(go.Scatter(
         x=trend_df["日期"],
@@ -2328,6 +2342,9 @@ def render_campaign_trend_content(client, account_id: str, account_name: str, ca
         name="展示",
         text=[f"{int(v):,}" for v in trend_df["展示"]],
         textposition="middle right",
+        textfont=dict(size=text_size),
+        marker=dict(size=14),
+        line=dict(width=3),
     ))
     fig.add_trace(go.Scatter(
         x=trend_df["日期"],
@@ -2336,23 +2353,57 @@ def render_campaign_trend_content(client, account_id: str, account_name: str, ca
         name="点击",
         text=[f"{int(v):,}" for v in trend_df["点击"]],
         textposition="bottom center",
+        textfont=dict(size=text_size),
+        marker=dict(size=14),
+        line=dict(width=3),
     ))
     fig.update_layout(
-        title="最近 7 天：花费 / 展示 / 点击趋势",
-        height=430,
-        margin=dict(l=10, r=10, t=50, b=20),
+        title=dict(text="最近 7 天：花费 / 展示 / 点击趋势", font=dict(size=20)),
+        height=500,
+        margin=dict(l=20, r=20, t=66, b=35),
         legend_title_text="",
-        xaxis_title="时间",
+        legend=dict(font=dict(size=14), orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis_title="日期",
         yaxis_title="花费 / 展示 / 点击",
         hovermode="x unified",
+        font=dict(size=14),
+        plot_bgcolor="rgba(255,255,255,0)",
+        paper_bgcolor="rgba(255,255,255,0)",
     )
+    fig.update_xaxes(showgrid=False, tickfont=dict(size=13))
+    fig.update_yaxes(gridcolor="rgba(148,163,184,0.22)", tickfont=dict(size=13))
     st.plotly_chart(fig, use_container_width=True)
 
-    display_df = trend_df.copy()
-    display_df["花费"] = display_df["花费"].map(lambda x: format_amount(x, currency))
+    display_df = trend_df[["日期", "展示", "点击", "花费"]].copy()
     display_df["展示"] = display_df["展示"].map(lambda x: f"{int(x):,}")
     display_df["点击"] = display_df["点击"].map(lambda x: f"{int(x):,}")
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    display_df["花费"] = display_df["花费"].map(lambda x: format_amount(x, currency))
+
+    detail_rows_html = "".join(
+        f"""
+        <tr>
+            <td>{escape(str(row['日期']))}</td>
+            <td>{escape(str(row['展示']))}</td>
+            <td>{escape(str(row['点击']))}</td>
+            <td>{escape(str(row['花费']))}</td>
+        </tr>
+        """
+        for _, row in display_df.iterrows()
+    )
+    st.markdown(
+        f"""
+        <div class="last7-table-wrap">
+            <div class="last7-table-title">最近 7 天明细数据</div>
+            <table class="last7-table">
+                <thead>
+                    <tr><th>日期</th><th>展示</th><th>点击</th><th>花费</th></tr>
+                </thead>
+                <tbody>{detail_rows_html}</tbody>
+            </table>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 if hasattr(st, "dialog"):
@@ -2370,7 +2421,7 @@ def render_campaign_data_table(client, details_df: pd.DataFrame):
     st.markdown(
         """
         <div class="section-title">数据系列</div>
-        <div class="section-subtitle">展示 MCC 经理号下所有 Ads 子账户的广告系列数据；一个子账户有多个广告系列时会显示多行。</div>
+        <div class="section-subtitle">展示 MCC 经理号下所有 Ads 子账户的广告系列数据；同一个子账户的多个广告系列已自动排列在一起。</div>
         """,
         unsafe_allow_html=True,
     )
@@ -2382,28 +2433,82 @@ def render_campaign_data_table(client, details_df: pd.DataFrame):
     st.markdown(
         """
         <style>
+            .campaign-table-note {
+                margin: 2px 0 12px;
+                color: #64748b;
+                font-size: 13px !important;
+            }
             .campaign-grid-head, .campaign-grid-cell {
-                min-height: 38px;
+                min-height: 50px;
                 display:flex;
                 align-items:center;
-                border-bottom:1px solid #e8edf4;
-                line-height:1.22;
+                line-height:1.36;
                 word-break:break-word;
+                background:#ffffff;
+                box-sizing:border-box;
             }
             .campaign-grid-head {
-                background:#f5f7fb;
-                color:#64748b;
-                font-weight:900;
-                font-size:11px !important;
-                padding:8px 4px;
+                color:#334155;
+                font-weight:950;
+                font-size:17px !important;
+                padding:13px 8px 12px;
+                border-top:1px solid #e2e8f0;
+                border-bottom:4px solid #cbd5e1;
+                letter-spacing:-0.01em;
             }
             .campaign-grid-cell {
-                background:#ffffff;
-                color:#172033;
-                font-size:12px !important;
-                padding:8px 4px;
+                color:#1f2a44;
+                font-size:17px !important;
+                font-weight:500;
+                padding:13px 8px;
+                border-bottom:1.5px solid #d7dee8;
             }
-            .campaign-account-name {font-weight:850;color:#111827;font-size:12px !important;}
+            .campaign-account-name {font-weight:900;color:#0f172a;font-size:17px !important;}
+            .campaign-grid-cell:nth-child(1), .campaign-grid-head:nth-child(1) {border-left:0;}
+            .last7-table-wrap {
+                background:#ffffff;
+                border:1px solid #e2e8f0;
+                border-radius:16px;
+                box-shadow:0 14px 34px rgba(15,23,42,.07);
+                overflow:hidden;
+                margin-top:14px;
+            }
+            .last7-table-title {
+                padding:14px 16px;
+                color:#0f172a;
+                font-size:18px !important;
+                font-weight:900;
+                border-bottom:4px solid #cbd5e1;
+            }
+            .last7-table {
+                width:100%;
+                border-collapse:collapse;
+                font-size:17px !important;
+                color:#1f2a44;
+                background:#ffffff;
+            }
+            .last7-table th {
+                text-align:left;
+                padding:13px 16px;
+                color:#334155;
+                font-size:17px !important;
+                font-weight:950;
+                background:#ffffff;
+                border-bottom:3px solid #cbd5e1;
+            }
+            .last7-table td {
+                padding:13px 16px;
+                background:#ffffff;
+                border-bottom:1.5px solid #d7dee8;
+                font-size:17px !important;
+            }
+            .last7-table tr:last-child td {border-bottom:none;}
+            .stButton>button {
+                min-height:42px !important;
+                font-size:16px !important;
+                font-weight:900 !important;
+                border-radius:12px !important;
+            }
         </style>
         """,
         unsafe_allow_html=True,
@@ -2413,7 +2518,7 @@ def render_campaign_data_table(client, details_df: pd.DataFrame):
         "Ads子账户名称", "广告系列名称", "广告系列预算", "货币", "展示", "点击", "点击率",
         "实际CPC", "配置CPC", "花费（费用）", "投放日期", "操作"
     ]
-    widths = [1.55, 1.95, 0.9, 0.55, 0.7, 0.65, 0.65, 0.75, 0.75, 0.85, 1.15, 0.55]
+    widths = [1.65, 2.25, 0.95, 0.58, 0.74, 0.70, 0.72, 0.82, 0.82, 0.92, 1.20, 0.62]
     header_cols = st.columns(widths, gap="small")
     for col, header in zip(header_cols, headers):
         col.markdown(f'<div class="campaign-grid-head">{escape(header)}</div>', unsafe_allow_html=True)
@@ -2450,7 +2555,7 @@ def render_campaign_data_table(client, details_df: pd.DataFrame):
         for col, value in zip(row_cols[:-1], values):
             col.markdown(f'<div class="campaign-grid-cell">{value}</div>', unsafe_allow_html=True)
         with row_cols[-1]:
-            if st.button("查看", key=f"trend_btn_{account_id}_{campaign_id}_{idx}", use_container_width=True):
+            if st.button("查看趋势", key=f"trend_btn_{account_id}_{campaign_id}_{idx}", use_container_width=True):
                 open_campaign_trend_dialog(client, account_id, account_name, campaign_id, campaign_name, currency)
 
 def render_data_series_controls():
@@ -2481,6 +2586,7 @@ def render_direct_full_page(client, accounts_df: pd.DataFrame, manager_customer_
                 <div class="page-kicker">FFS AUTO-ADS</div>
                 <h1 class="page-title">仪表盘</h1>
                 <p class="page-desc">Google Ads 数据分析控制台 · 直接显示 MCC 下所有 Ads 子账户广告系列数据</p>
+                <div style="display:inline-flex;margin-top:12px;padding:7px 12px;border-radius:999px;background:#fff1f2;color:#e11d48;font-size:14px;font-weight:900;border:1px solid #fecdd3;">版本：{escape(APP_UI_VERSION)}</div>
             </div>
             """,
             unsafe_allow_html=True,
