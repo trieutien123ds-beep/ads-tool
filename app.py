@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
@@ -18,7 +19,7 @@ st.set_page_config(
     page_title="FFS AUTO-ADS",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 
@@ -1268,9 +1269,6 @@ def make_excel(campaign_df: pd.DataFrame, daily_df: pd.DataFrame, error_df: pd.D
 
 # =============== FFS AUTO-ADS SaaS 后台 V2：页面样式、账户页、仪表盘 ===============
 
-APP_PAGES = ["仪表盘", "谷歌子账号", "每日趋势", "关键词分析", "搜索词分析", "报表下载", "系统设置"]
-
-
 def micros_to_amount(value):
     """把 Google Ads micros 金额转成普通金额。"""
     try:
@@ -1318,14 +1316,8 @@ def render_saas_css():
                 display: none !important;
             }
 
-            [data-testid="stSidebar"] {
-                background: #ffffff !important;
-                border-right: 1px solid #e9edf3 !important;
-                box-shadow: 10px 0 30px rgba(15, 23, 42, 0.025);
-            }
-
-            [data-testid="stSidebar"] * {
-                font-size: 13px !important;
+            [data-testid="stSidebar"], [data-testid="collapsedControl"] {
+                display: none !important;
             }
 
             .main .block-container, [data-testid="stMainBlockContainer"] {
@@ -1333,7 +1325,7 @@ def render_saas_css():
                 padding-left: 26px !important;
                 padding-right: 26px !important;
                 padding-bottom: 30px !important;
-                max-width: 1560px !important;
+                max-width: none !important;
             }
 
             div[data-testid="stVerticalBlock"] { gap: 0.58rem !important; }
@@ -1529,26 +1521,6 @@ def render_saas_css():
                 .api-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
             }
         </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def render_sidebar_brand(manager_customer_id: str, accounts_count: int):
-    st.sidebar.markdown(
-        f"""
-        <div class="ffs-sidebar-brand">
-            <div class="ffs-brand-row">
-                <div class="ffs-brand-logo">F</div>
-                <div>
-                    <div class="ffs-brand-title">FFS AUTO-ADS</div>
-                    <div class="ffs-brand-sub">Google Ads MCC Console</div>
-                </div>
-            </div>
-            <div style="height:10px"></div>
-            <div class="small-muted">MCC：<b>{manager_customer_id}</b></div>
-            <div class="small-muted">已同步账户：<b>{accounts_count}</b> 个</div>
-        </div>
         """,
         unsafe_allow_html=True,
     )
@@ -1951,40 +1923,7 @@ def render_dashboard_page(campaign_df: pd.DataFrame, daily_df: pd.DataFrame, err
     with cols[2]: render_metric_card(f"平均 CPC（{currency}）", f"{overall_cpc:.2f}", "花费 / 点击量")
     with cols[3]: render_metric_card(f"CPA（{currency}）", f"{overall_cpa:.2f}", "花费 / 转化数")
 
-    daily_summary_df = aggregate_daily_report(daily_df)
-    chart_df = campaign_df.copy()
-    if "账户名称" in chart_df.columns and "广告系列名称" in chart_df.columns:
-        chart_df["广告系列显示名称"] = chart_df["账户名称"].astype(str) + "｜" + chart_df["广告系列名称"].astype(str)
-    else:
-        chart_df["广告系列显示名称"] = chart_df.get("广告系列名称", "")
-
-    st.markdown('<div class="section-title">趋势与排行榜</div>', unsafe_allow_html=True)
-    tab1, tab2, tab3 = st.tabs(["趋势图", "广告系列排行", "账户汇总"])
-    with tab1:
-        if not daily_summary_df.empty:
-            fig_daily = px.line(daily_summary_df, x="日期", y=["花费", "点击量", "转化数"], markers=True, title="每日趋势")
-            fig_daily.update_layout(height=360, margin=dict(l=10, r=10, t=45, b=10), legend_title_text="")
-            st.plotly_chart(fig_daily, use_container_width=True)
-        else:
-            st.info("暂无每日趋势数据。")
-    with tab2:
-        col_chart1, col_chart2 = st.columns(2)
-        with col_chart1:
-            cost_df = chart_df.sort_values("花费", ascending=False).head(15)
-            fig_cost = px.bar(cost_df, x="广告系列显示名称", y="花费", title=f"花费排行 Top 15（{currency}）")
-            fig_cost.update_layout(height=360, xaxis_title="", yaxis_title="花费", margin=dict(l=10, r=10, t=45, b=10))
-            st.plotly_chart(fig_cost, use_container_width=True)
-        with col_chart2:
-            roas_df = chart_df.sort_values("ROAS", ascending=False).head(15)
-            fig_roas = px.bar(roas_df, x="广告系列显示名称", y="ROAS", title="ROAS 排行 Top 15")
-            fig_roas.update_layout(height=360, xaxis_title="", yaxis_title="ROAS", margin=dict(l=10, r=10, t=45, b=10))
-            st.plotly_chart(fig_roas, use_container_width=True)
-    with tab3:
-        account_summary_df = build_account_summary(campaign_df)
-        if account_summary_df.empty:
-            st.info("暂无账户汇总数据。")
-        else:
-            st.dataframe(account_summary_df, use_container_width=True, hide_index=True)
+    # 趋势图、排行榜和账户汇总模块已按需求移除。
 
     st.markdown('<div class="section-title">数据明细</div>', unsafe_allow_html=True)
     detail_tab1, detail_tab2, detail_tab3 = st.tabs(["广告系列数据", "每日趋势数据", "下载报表"])
@@ -2153,6 +2092,460 @@ def render_child_accounts_page(client, accounts_df: pd.DataFrame, selected_custo
             st.dataframe(error_df, use_container_width=True, hide_index=True)
 
 
+
+# =============== 直接全页版：全部子账号广告系列数据表 ===============
+
+def build_ads_table_date_range_from_preset(preset: str, custom_start=None, custom_end=None):
+    """数据系列表格专用日期范围。"""
+    today = date.today()
+    if preset == "今天":
+        return today, today
+    if preset == "昨天":
+        yesterday = today - timedelta(days=1)
+        return yesterday, yesterday
+    if preset == "最近两天":
+        return today - timedelta(days=1), today
+    if preset == "最近三天":
+        return today - timedelta(days=2), today
+    if preset == "最近七天":
+        return today - timedelta(days=6), today
+    if preset == "最近一个月":
+        return today - timedelta(days=30), today
+    return custom_start or today - timedelta(days=6), custom_end or today
+
+
+def calculate_campaign_days_to_today(start_date_value):
+    """投放时间：从广告系列开始日期到今天，按自然日计算。"""
+    if not start_date_value:
+        return None
+    try:
+        start_dt = date.fromisoformat(str(start_date_value)[:10])
+    except Exception:
+        return None
+    return max((date.today() - start_dt).days + 1, 0)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def query_campaign_table_for_accounts(_client, customer_ids: list, accounts_df: pd.DataFrame, start_date: str, end_date: str):
+    """读取 MCC 下所有 Ads 子账户的广告系列表格数据。"""
+    details = []
+    error_rows = []
+
+    account_name_map = {}
+    account_currency_map = {}
+    if not accounts_df.empty and "账户ID" in accounts_df.columns:
+        account_name_map = dict(zip(accounts_df["账户ID"], accounts_df["账户名称"]))
+        if "币种" in accounts_df.columns:
+            account_currency_map = dict(zip(accounts_df["账户ID"], accounts_df["币种"]))
+
+    total_accounts = len(customer_ids)
+    progress = st.progress(0, text="准备读取 MCC 下所有 Ads 子账户广告系列数据...")
+
+    for index, customer_id in enumerate(customer_ids, start=1):
+        customer_id = normalize_customer_id(customer_id)
+        account_name = account_name_map.get(customer_id, f"Google Ads {customer_id}")
+        progress.progress(
+            min(index / max(total_accounts, 1), 1.0),
+            text=f"正在查询 {index}/{total_accounts}：{account_name}（{customer_id}）"
+        )
+
+        try:
+            detail_df = query_account_campaign_details(_client, customer_id, start_date, end_date)
+            if not detail_df.empty:
+                detail_df.insert(0, "account_id", customer_id)
+                detail_df.insert(1, "account_name", account_name)
+                if "currency" not in detail_df.columns:
+                    detail_df.insert(2, "currency", account_currency_map.get(customer_id, ""))
+                else:
+                    detail_df["currency"] = detail_df["currency"].fillna(account_currency_map.get(customer_id, ""))
+                details.append(detail_df)
+        except GoogleAdsException as e:
+            error_rows.append({"account_id": customer_id, "account_name": account_name, "error": format_google_ads_error(e)})
+        except Exception as e:
+            error_rows.append({"account_id": customer_id, "account_name": account_name, "error": str(e)})
+
+    progress.empty()
+    details_df = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
+    if not details_df.empty:
+        details_df["runtime_days_to_today"] = details_df["start_date"].apply(calculate_campaign_days_to_today)
+        details_df = details_df.sort_values(["cost", "impressions", "clicks"], ascending=[False, False, False]).reset_index(drop=True)
+    return details_df, pd.DataFrame(error_rows)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def query_campaign_last7_daily(_client, customer_id: str, campaign_id: str) -> pd.DataFrame:
+    """读取单个广告系列最近 7 天每日花费、展示、点击。"""
+    customer_id = normalize_customer_id(customer_id)
+    campaign_id = normalize_customer_id(campaign_id)
+    end_date = date.today()
+    start_date = end_date - timedelta(days=6)
+    start_str = start_date.isoformat()
+    end_str = end_date.isoformat()
+    start_time = time.perf_counter()
+    ga_service = _client.get_service("GoogleAdsService")
+
+    query = f"""
+        SELECT
+          segments.date,
+          campaign.id,
+          campaign.name,
+          metrics.impressions,
+          metrics.clicks,
+          metrics.cost_micros
+        FROM campaign
+        WHERE
+          campaign.id = {campaign_id}
+          AND segments.date BETWEEN '{start_str}' AND '{end_str}'
+        ORDER BY segments.date
+    """
+
+    base_dates = pd.DataFrame({"日期": [(start_date + timedelta(days=i)).isoformat() for i in range(7)]})
+    rows = []
+    try:
+        response = ga_service.search_stream(customer_id=customer_id, query=query)
+        for batch in response:
+            for row in batch.results:
+                rows.append({
+                    "日期": str(row.segments.date),
+                    "花费": round(float(row.metrics.cost_micros or 0) / 1_000_000, 2),
+                    "展示": int(row.metrics.impressions or 0),
+                    "点击": int(row.metrics.clicks or 0),
+                })
+        elapsed = time.perf_counter() - start_time
+        record_api_usage("campaign_last7_daily", customer_id, start_str, end_str, "成功", len(rows), elapsed, "")
+    except Exception as e:
+        elapsed = time.perf_counter() - start_time
+        record_api_usage("campaign_last7_daily", customer_id, start_str, end_str, "失败", 0, elapsed, str(e))
+        raise
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        df = base_dates.copy()
+        df["花费"] = 0.0
+        df["展示"] = 0
+        df["点击"] = 0
+    else:
+        df = base_dates.merge(df, on="日期", how="left")
+        df[["花费", "展示", "点击"]] = df[["花费", "展示", "点击"]].fillna(0)
+        df["花费"] = df["花费"].astype(float).round(2)
+        df["展示"] = df["展示"].astype(int)
+        df["点击"] = df["点击"].astype(int)
+    return df
+
+
+def get_campaign_table_currency(details_df: pd.DataFrame) -> str:
+    if details_df.empty:
+        return ""
+    currency_col = "currency" if "currency" in details_df.columns else "account_currency"
+    if currency_col not in details_df.columns:
+        return ""
+    currencies = [c for c in details_df[currency_col].dropna().astype(str).unique().tolist() if c]
+    if len(currencies) == 1:
+        return currencies[0]
+    if len(currencies) > 1:
+        return "多币种"
+    return ""
+
+
+def render_campaign_core_metrics(details_df: pd.DataFrame):
+    if details_df.empty:
+        return
+    currency = get_campaign_table_currency(details_df)
+    currency_label = currency or "货币"
+    total_cost = float(pd.to_numeric(details_df.get("cost", 0), errors="coerce").fillna(0).sum())
+    total_impressions = int(pd.to_numeric(details_df.get("impressions", 0), errors="coerce").fillna(0).sum())
+    total_clicks = int(pd.to_numeric(details_df.get("clicks", 0), errors="coerce").fillna(0).sum())
+    overall_ctr = safe_divide(total_clicks, total_impressions) * 100
+    overall_cpc = safe_divide(total_cost, total_clicks)
+    campaign_count = details_df["campaign_id"].nunique() if "campaign_id" in details_df.columns else len(details_df)
+    account_count = details_df["account_id"].nunique() if "account_id" in details_df.columns else 0
+
+    st.markdown('<div class="section-title">核心指标</div>', unsafe_allow_html=True)
+    cols = st.columns(6)
+    with cols[0]: render_metric_card(f"花费（{currency_label}）", f"{total_cost:,.2f}", "当前时间范围合计")
+    with cols[1]: render_metric_card("展示", f"{total_impressions:,}", "Impressions")
+    with cols[2]: render_metric_card("点击", f"{total_clicks:,}", "Clicks")
+    with cols[3]: render_metric_card("点击率", f"{overall_ctr:.2f}%", "点击 / 展示")
+    with cols[4]: render_metric_card(f"实际 CPC（{currency_label}）", f"{overall_cpc:.2f}", "花费 / 点击")
+    with cols[5]: render_metric_card("广告系列数", f"{campaign_count:,}", f"覆盖 {account_count:,} 个子账户")
+
+
+def render_campaign_trend_content(client, account_id: str, account_name: str, campaign_id: str, campaign_name: str, currency: str):
+    st.markdown(
+        f"""
+        <div class="soft-card" style="margin-bottom:10px;">
+            <div style="font-weight:900;color:#111827;font-size:16px;">{escape(str(campaign_name))}</div>
+            <div class="small-muted">{escape(str(account_name))} · Ads ID：{escape(str(account_id))} · 最近 7 天</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    try:
+        trend_df = query_campaign_last7_daily(client, account_id, campaign_id)
+    except Exception as e:
+        st.error(f"读取最近 7 天趋势失败：{e}")
+        return
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=trend_df["日期"],
+        y=trend_df["花费"],
+        mode="lines+markers+text",
+        name=f"花费（{currency or ''}）".strip(),
+        text=[f"{v:,.2f}" for v in trend_df["花费"]],
+        textposition="top center",
+    ))
+    fig.add_trace(go.Scatter(
+        x=trend_df["日期"],
+        y=trend_df["展示"],
+        mode="lines+markers+text",
+        name="展示",
+        text=[f"{int(v):,}" for v in trend_df["展示"]],
+        textposition="middle right",
+    ))
+    fig.add_trace(go.Scatter(
+        x=trend_df["日期"],
+        y=trend_df["点击"],
+        mode="lines+markers+text",
+        name="点击",
+        text=[f"{int(v):,}" for v in trend_df["点击"]],
+        textposition="bottom center",
+    ))
+    fig.update_layout(
+        title="最近 7 天：花费 / 展示 / 点击趋势",
+        height=430,
+        margin=dict(l=10, r=10, t=50, b=20),
+        legend_title_text="",
+        xaxis_title="时间",
+        yaxis_title="花费 / 展示 / 点击",
+        hovermode="x unified",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    display_df = trend_df.copy()
+    display_df["花费"] = display_df["花费"].map(lambda x: format_amount(x, currency))
+    display_df["展示"] = display_df["展示"].map(lambda x: f"{int(x):,}")
+    display_df["点击"] = display_df["点击"].map(lambda x: f"{int(x):,}")
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+
+if hasattr(st, "dialog"):
+    @st.dialog("广告系列最近 7 天数据", width="large")
+    def open_campaign_trend_dialog(client, account_id: str, account_name: str, campaign_id: str, campaign_name: str, currency: str):
+        render_campaign_trend_content(client, account_id, account_name, campaign_id, campaign_name, currency)
+else:
+    def open_campaign_trend_dialog(client, account_id: str, account_name: str, campaign_id: str, campaign_name: str, currency: str):
+        st.warning("当前 Streamlit 版本不支持弹窗，已在页面下方直接展示最近 7 天数据。")
+        render_campaign_trend_content(client, account_id, account_name, campaign_id, campaign_name, currency)
+
+
+def render_campaign_data_table(client, details_df: pd.DataFrame):
+    """按用户指定表头渲染广告系列数据，最后一列提供查看按钮。"""
+    st.markdown(
+        """
+        <div class="section-title">数据系列</div>
+        <div class="section-subtitle">展示 MCC 经理号下所有 Ads 子账户的广告系列数据；一个子账户有多个广告系列时会显示多行。</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if details_df.empty:
+        st.info("当前时间范围内没有查询到广告系列数据。")
+        return
+
+    st.markdown(
+        """
+        <style>
+            .campaign-grid-head, .campaign-grid-cell {
+                min-height: 38px;
+                display:flex;
+                align-items:center;
+                border-bottom:1px solid #e8edf4;
+                line-height:1.22;
+                word-break:break-word;
+            }
+            .campaign-grid-head {
+                background:#f5f7fb;
+                color:#64748b;
+                font-weight:900;
+                font-size:11px !important;
+                padding:8px 4px;
+            }
+            .campaign-grid-cell {
+                background:#ffffff;
+                color:#172033;
+                font-size:12px !important;
+                padding:8px 4px;
+            }
+            .campaign-account-name {font-weight:850;color:#111827;font-size:12px !important;}
+            .campaign-account-id {font-size:10px !important;color:#7b8ba5;margin-top:3px;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    headers = [
+        "Ads子账户名称", "广告系列名称", "广告系列预算", "货币", "展示", "点击", "点击率",
+        "实际CPC", "配置CPC", "花费（费用）", "投放日期", "投放时间", "操作"
+    ]
+    widths = [1.75, 1.85, 0.9, 0.55, 0.7, 0.65, 0.65, 0.75, 0.75, 0.85, 0.8, 0.85, 0.55]
+    header_cols = st.columns(widths, gap="small")
+    for col, header in zip(header_cols, headers):
+        col.markdown(f'<div class="campaign-grid-head">{escape(header)}</div>', unsafe_allow_html=True)
+
+    max_rows = 300
+    if len(details_df) > max_rows:
+        st.warning(f"当前共有 {len(details_df)} 行，为避免页面过慢，先显示前 {max_rows} 行。")
+        render_df = details_df.head(max_rows).copy()
+    else:
+        render_df = details_df.copy()
+
+    for idx, row in render_df.iterrows():
+        currency = row.get("currency") or row.get("account_currency") or ""
+        account_id = str(row.get("account_id", ""))
+        account_name = str(row.get("account_name", "/"))
+        campaign_id = str(row.get("campaign_id", ""))
+        campaign_name = str(row.get("campaign_name", "/"))
+        runtime_days = row.get("runtime_days_to_today")
+        runtime_text = "/" if runtime_days is None or runtime_days == "" or pd.isna(runtime_days) else f"{int(runtime_days)}天"
+        configured_cpc = row.get("configured_cpc")
+        values = [
+            f'<div><div class="campaign-account-name">{escape(account_name)}</div><div class="campaign-account-id">Ads ID：{escape(account_id)}</div></div>',
+            escape(campaign_name),
+            escape(format_amount(row.get("budget"), currency)),
+            escape(str(currency or "/")),
+            escape(format_int(row.get("impressions"))),
+            escape(format_int(row.get("clicks"))),
+            escape(format_percent(row.get("ctr"))),
+            escape(format_amount(row.get("actual_cpc"), currency)),
+            escape(format_amount(configured_cpc, currency)),
+            escape(format_amount(row.get("cost"), currency)),
+            escape(str(row.get("start_date") or "/")),
+            escape(runtime_text),
+        ]
+        row_cols = st.columns(widths, gap="small")
+        for col, value in zip(row_cols[:-1], values):
+            col.markdown(f'<div class="campaign-grid-cell">{value}</div>', unsafe_allow_html=True)
+        with row_cols[-1]:
+            if st.button("查看", key=f"trend_btn_{account_id}_{campaign_id}_{idx}", use_container_width=True):
+                open_campaign_trend_dialog(client, account_id, account_name, campaign_id, campaign_name, currency)
+
+
+def render_data_series_controls():
+    """数据系列表头右上角的统一日期范围控件。"""
+    preset_options = ["今天", "昨天", "最近两天", "最近三天", "最近七天", "最近一个月", "自定义时间范围"]
+    preset = st.radio("时间范围", preset_options, index=4, horizontal=True, key="campaign_date_preset")
+    if preset == "自定义时间范围":
+        c1, c2 = st.columns(2)
+        with c1:
+            custom_start = st.date_input("开始日期", value=st.session_state.get("campaign_custom_start", date.today() - timedelta(days=6)), key="campaign_custom_start")
+        with c2:
+            custom_end = st.date_input("结束日期", value=st.session_state.get("campaign_custom_end", date.today()), key="campaign_custom_end")
+    else:
+        custom_start = custom_end = None
+    start, end = build_ads_table_date_range_from_preset(preset, custom_start, custom_end)
+    refresh_clicked = st.button("刷新数据", type="primary", use_container_width=True)
+    return start, end, preset, refresh_clicked
+
+
+def render_direct_full_page(client, accounts_df: pd.DataFrame, manager_customer_id: str):
+    all_customer_ids = accounts_df["账户ID"].dropna().astype(str).tolist()
+
+    top_left, top_right = st.columns([1.45, 1.0], gap="large")
+    with top_left:
+        st.markdown(
+            f"""
+            <div class="top-panel">
+                <div class="page-kicker">FFS AUTO-ADS</div>
+                <h1 class="page-title">仪表盘</h1>
+                <p class="page-desc">Google Ads 数据分析控制台 · 直接显示 MCC 下所有 Ads 子账户广告系列数据</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with top_right:
+        last_refresh = st.session_state.get("last_refresh_time", "尚未刷新")
+        st.markdown(
+            f"""
+            <div class="top-panel">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;">
+                    <span class="status-pill">● 当前显示 {len(all_customer_ids)} 个子账户</span>
+                    <span class="small-muted">MCC：{escape(manager_customer_id)}</span>
+                </div>
+                <div class="small-muted">最近刷新时间：<b>{escape(str(last_refresh))}</b></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    render_api_monitor_panel(expanded=False)
+
+    title_col, control_col = st.columns([1.0, 2.2], gap="large")
+    with title_col:
+        st.markdown(
+            """
+            <div class="section-title">广告系列数据</div>
+            <div class="section-subtitle">右侧时间范围会同时作用于所有 Ads 子账户和所有广告系列。</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("重新同步 MCC 子账号", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+    with control_col:
+        start, end, preset, refresh_clicked = render_data_series_controls()
+
+    if start > end:
+        st.error("开始日期不能晚于结束日期。")
+        st.stop()
+
+    start_str = start.isoformat()
+    end_str = end.isoformat()
+    current_signature = {
+        "customer_ids": [normalize_customer_id(x) for x in all_customer_ids],
+        "start_str": start_str,
+        "end_str": end_str,
+    }
+    saved_signature = st.session_state.get("campaign_table_signature")
+    has_current_data = saved_signature == current_signature
+
+    if refresh_clicked or not has_current_data:
+        with st.spinner(f"正在读取 {len(all_customer_ids)} 个 Ads 子账户，时间范围：{start_str} 至 {end_str} ..."):
+            details_df, error_df = query_campaign_table_for_accounts(client, all_customer_ids, accounts_df, start_str, end_str)
+        st.session_state["campaign_table_details_df"] = details_df
+        st.session_state["campaign_table_error_df"] = error_df
+        st.session_state["campaign_table_signature"] = current_signature
+        st.session_state["last_refresh_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        st.rerun()
+
+    details_df = st.session_state.get("campaign_table_details_df", pd.DataFrame())
+    error_df = st.session_state.get("campaign_table_error_df", pd.DataFrame())
+
+    if details_df.empty:
+        st.markdown(
+            f"""
+            <div class="placeholder-card">
+                <div style="font-size:18px;font-weight:900;color:#111827;margin-bottom:8px;">暂无广告系列数据</div>
+                <div>当前时间范围：{escape(start_str)} 至 {escape(end_str)}。请确认子账户有广告系列数据，或调整右上角时间范围。</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        currency = get_campaign_table_currency(details_df)
+        if currency == "多币种":
+            currencies = sorted([c for c in details_df.get("currency", pd.Series(dtype=str)).dropna().astype(str).unique().tolist() if c])
+            st.warning(f"本次包含多个币种：{', '.join(currencies)}。花费与 CPC 不做汇率换算，只按原币种直接展示。")
+        render_campaign_core_metrics(details_df)
+        st.caption(f"当前时间范围：{start_str} 至 {end_str}；已同步 {len(all_customer_ids)} 个 Ads 子账户。")
+        render_campaign_data_table(client, details_df)
+
+    if error_df is not None and not error_df.empty:
+        with st.expander("查看同步失败的子账户", expanded=False):
+            st.dataframe(error_df, use_container_width=True, hide_index=True)
+
+
+
 if not check_password():
     st.stop()
 
@@ -2186,160 +2579,4 @@ if accounts_df.empty:
     st.warning("没有同步到 MCC 下级普通广告账户。请确认 login_customer_id 是 MCC 账号，并且当前授权邮箱有权限。")
     st.stop()
 
-# ---------- 左侧固定导航栏 ----------
-render_sidebar_brand(manager_customer_id, len(accounts_df))
-
-with st.sidebar:
-    page = st.radio("导航菜单", APP_PAGES, index=0, label_visibility="collapsed")
-
-    st.markdown('<div class="section-title">账户选择</div>', unsafe_allow_html=True)
-    if st.button("🔄 重新同步 MCC 子账号", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
-
-    account_options = [f"{row['账户名称']}｜{row['账户ID']}" for _, row in accounts_df.iterrows()]
-
-    with st.expander("谷歌子账号", expanded=True):
-        query_mode = st.radio("选择方式", ["单个账户", "多个账户", "全部账户"], index=0)
-        if query_mode == "单个账户":
-            selected_option = st.selectbox("选择广告账户", account_options, label_visibility="collapsed")
-            selected_customer_ids = [selected_option.split("｜")[-1]] if selected_option else []
-        elif query_mode == "多个账户":
-            selected_options = st.multiselect("选择多个广告账户", account_options, default=account_options[:1], label_visibility="collapsed")
-            selected_customer_ids = [option.split("｜")[-1] for option in selected_options]
-        else:
-            st.caption("全部账户会逐个调用 API，账户多时速度会变慢。")
-            selected_customer_ids = accounts_df["账户ID"].tolist()
-
-    if not selected_customer_ids:
-        st.warning("请至少选择一个广告账户。")
-
-# ---------- 顶部日期快捷按钮和刷新 ----------
-selected_accounts_df = accounts_df[accounts_df["账户ID"].isin(selected_customer_ids)].copy()
-
-top_controls = st.container()
-with top_controls:
-    if page == "谷歌子账号":
-        c1, c2, c3 = st.columns([0.95, 0.95, 0.65], gap="medium")
-        saved_child_start = st.session_state.get("child_start_date", date.today() - timedelta(days=30))
-        saved_child_end = st.session_state.get("child_end_date", date.today())
-        with c1:
-            start = st.date_input("开始日期", value=saved_child_start, key="child_start_date")
-        with c2:
-            end = st.date_input("结束日期", value=saved_child_end, key="child_end_date")
-        with c3:
-            st.write("")
-            run_button = st.button("刷新数据", type="primary", use_container_width=True)
-    else:
-        c1, c2, c3 = st.columns([1.1, 1.7, 0.75], gap="medium")
-        with c1:
-            preset = st.radio("日期范围", ["最近7天", "最近14天", "最近30天", "自定义"], index=2, horizontal=True)
-        with c2:
-            if preset == "自定义":
-                dc1, dc2 = st.columns(2)
-                custom_start = dc1.date_input("开始日期", value=date.today() - timedelta(days=30))
-                custom_end = dc2.date_input("结束日期", value=date.today())
-            else:
-                custom_start = custom_end = None
-                st.caption("使用快捷日期范围；如需固定日期，选择「自定义」。")
-        start, end = build_date_range_from_preset(preset, custom_start, custom_end)
-        with c3:
-            st.write("")
-            run_button = st.button("刷新数据", type="primary", use_container_width=True)
-
-if start > end:
-    st.error("开始日期不能晚于结束日期。")
-    st.stop()
-
-start_str = start.isoformat()
-end_str = end.isoformat()
-date_label = f"{start_str} 至 {end_str}"
-
-# ---------- Page title ----------
-subtitle_map = {
-    "仪表盘": "FFS AUTO-ADS · Google Ads 数据分析控制台",
-    "谷歌子账号": "MCC 子账号管理 · 可用资金与关联广告系列",
-    "每日趋势": "按日期查看广告表现变化",
-    "关键词分析": "关键词表现模块预留",
-    "搜索词分析": "搜索词与否定关键词分析模块预留",
-    "报表下载": "导出广告系列和每日趋势数据",
-    "系统设置": "系统配置和 API 调用状态",
-}
-render_top_header(page, subtitle_map.get(page, "Google Ads \u6570\u636e\u5206\u6790\u63a7\u5236\u53f0"), len(selected_customer_ids), date_label, show_date_label=(page != "\u8c37\u6b4c\u5b50\u8d26\u53f7"))
-
-# ---------- 数据刷新逻辑 ----------
-if run_button:
-    if not selected_customer_ids:
-        st.error("请先选择至少一个广告账户。")
-    elif page == "谷歌子账号":
-        with st.spinner(f"正在从 {len(selected_customer_ids)} 个 Google Ads 子账号拉取广告系列数据，请稍等..."):
-            child_details_df, child_error_df, child_enabled_count = query_child_campaigns_for_accounts(
-                client,
-                selected_customer_ids,
-                accounts_df,
-                start_str,
-                end_str,
-            )
-        st.session_state["child_campaign_details_df"] = child_details_df
-        st.session_state["child_campaign_error_df"] = child_error_df
-        st.session_state["child_enabled_campaign_count"] = child_enabled_count
-        st.session_state["child_campaign_signature"] = {
-            "selected_customer_ids": [normalize_customer_id(x) for x in selected_customer_ids],
-            "start_str": start_str,
-            "end_str": end_str,
-        }
-        st.session_state["last_refresh_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        st.rerun()
-    else:
-        with st.spinner(f"正在从 {len(selected_customer_ids)} 个 Google Ads 账户拉取数据，请稍等..."):
-            campaign_df, daily_df, error_df = query_reports_for_accounts(client, selected_customer_ids, accounts_df, start_str, end_str)
-        st.session_state["campaign_df"] = campaign_df
-        st.session_state["daily_df"] = daily_df
-        st.session_state["error_df"] = error_df
-        st.session_state["last_query_mode"] = query_mode
-        st.session_state["last_selected_customer_ids"] = selected_customer_ids
-        st.session_state["last_start_str"] = start_str
-        st.session_state["last_end_str"] = end_str
-        st.session_state["last_refresh_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        st.rerun()
-
-campaign_df = st.session_state.get("campaign_df", pd.DataFrame())
-daily_df = st.session_state.get("daily_df", pd.DataFrame())
-error_df = st.session_state.get("error_df", pd.DataFrame())
-currency = get_currency_label(campaign_df) if not campaign_df.empty else ""
-
-# ---------- 页面路由 ----------
-if page == "仪表盘":
-    render_dashboard_page(
-        campaign_df=campaign_df,
-        daily_df=daily_df,
-        error_df=error_df,
-        currency=currency,
-        query_mode=st.session_state.get("last_query_mode", query_mode),
-        selected_customer_ids=st.session_state.get("last_selected_customer_ids", selected_customer_ids),
-        start_str=st.session_state.get("last_start_str", start_str),
-        end_str=st.session_state.get("last_end_str", end_str),
-    )
-elif page == "谷歌子账号":
-    render_child_accounts_page(client, accounts_df, selected_customer_ids, start_str, end_str)
-elif page == "报表下载":
-    if campaign_df.empty:
-        render_placeholder_page("报表下载")
-        st.info("请先在仪表盘页面点击「刷新数据」，生成数据后再下载报表。")
-    else:
-        st.markdown('<div class="section-title">报表下载</div>', unsafe_allow_html=True)
-        excel_data = make_excel(campaign_df, daily_df, error_df)
-        st.download_button(
-            label="📥 下载当前数据 Excel 报表",
-            data=excel_data,
-            file_name=f"google_ads_report_{st.session_state.get('last_start_str', start_str)}_to_{st.session_state.get('last_end_str', end_str)}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-        st.dataframe(campaign_df, use_container_width=True, hide_index=True)
-elif page == "系统设置":
-    render_api_monitor_panel(expanded=True)
-    with st.expander("已同步 MCC 子账号", expanded=False):
-        st.dataframe(accounts_df, use_container_width=True, hide_index=True)
-else:
-    render_placeholder_page(page)
+render_direct_full_page(client, accounts_df, manager_customer_id)
